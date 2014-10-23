@@ -1,4 +1,4 @@
-# RC4 Cipher in 77 bytes of x86.
+# RC4 Cipher in 75 bytes of x86.
 # Peter Ferrie
 # Oct 23, 2014
 
@@ -24,6 +24,10 @@ compute_rc4:
 
     # Make ESI point to buf (+32 for pushad, +4 for return address).
     mov esi, DWORD PTR [esp + 32 + 4]
+
+    # Set ecx to the address where we should stop writing key bytes.
+    mov ecx, DWORD PTR [esi]                    # (length)
+
     # Now make ESI point to the RC4 state.
     add esi, 4 + 16
     # Make EDI also point to the RC4 state.
@@ -68,13 +72,15 @@ loop_start:
     # j = j + K[i]
     add dl, BYTE PTR [ESI + ebx]
     # j = (j + K[i] + key[i]) % 256
-    add dl, BYTE PTR [ESI + 4 + eax]
+    add dl, BYTE PTR [ESI + eax - 16]
 
     # Note: This preserves the zeroness of the 3 most-signifigant bytes of EDX,
     # which is exactly what we want.
 
     # Swap bytes K[i] and K[j] (K[ebx] and K[edx]).
-    call swap_edx_ebx_bytes_using_al
+    mov al, BYTE PTR [ESI + edx]
+    xchg al, BYTE PTR [ESI + ebx]
+    mov BYTE PTR [ESI + edx], al
 
     # Increment ebx (mod 256)
     inc bl
@@ -107,7 +113,9 @@ stream_start:
     add dl, BYTE PTR [ESI + ebx]
 
     # swap K[i] and K[j] (K[ebx] and K[edx])
-    call swap_edx_ebx_bytes_using_al
+    mov al, BYTE PTR [ESI + edx]
+    xchg al, BYTE PTR [ESI + ebx]
+    mov BYTE PTR [ESI + edx], al
 
     # Output K[ (K[i] + K[j]) % 256 ]
     mov al, BYTE PTR [ESI + ebx]                # eax = K[i]
@@ -120,14 +128,6 @@ stream_start:
 stream_end:
 
     popad
-    ret
-
-# Little subroutine that swaps K[ebx] with K[edx].
-# It clobbers the AL register.
-swap_edx_ebx_bytes_using_al:
-    mov al, BYTE PTR [ESI + edx]
-    xchg al, BYTE PTR [ESI + ebx]
-    mov BYTE PTR [ESI + edx], al
     ret
 
 # Notes:
