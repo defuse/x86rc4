@@ -1,4 +1,4 @@
-# RC4 Cipher in 74 bytes of x86.
+# RC4 Cipher in 73 bytes of x86.
 # Peter Ferrie
 # Oct 23, 2014
 
@@ -79,11 +79,12 @@ loop_start:
     add dl, BYTE PTR [ESI + ebx]
 
     popfd
-    pushfd
     jb skip_key
 
     # j = (j + K[i] + key[i]) % 256
     add dl, BYTE PTR [ESI + eax - 16]
+
+    clc
 
 skip_key:
     # Note: This preserves the zeroness of the 3 most-signifigant bytes of EDX,
@@ -94,10 +95,8 @@ skip_key:
     xchg al, BYTE PTR [ESI + ebx]
     mov BYTE PTR [ESI + edx], al
 
-    popfd
     jb stream_start
 
-inc_ebx:
     # Increment ebx (mod 256)
     inc bl
     # If ebx was 255, it will now be 0, because overflow.
