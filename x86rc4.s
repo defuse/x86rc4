@@ -1,9 +1,8 @@
-# RC4 Cipher in 104 bytes of x86.
-# Taylor Hornby
+# RC4 Cipher in 77 bytes of x86.
+# Peter Ferrie
 # Oct 23, 2014
 
-# Based on this pseudocode:
-# http://blog.cdleary.com/2009/09/learning-python-by-example-rc4/
+# Based on RC4 Cipher in 104 bytes of x86 by Taylor Hornby
 
 .intel_syntax noprefix
 .globl _start
@@ -25,88 +24,77 @@ compute_rc4:
 
     # Make ESI point to buf (+32 for pushad, +4 for return address).
     mov esi, DWORD PTR [esp + 32 + 4]
-    # Make EDI point to the output part of buf.
+    # Now make ESI point to the RC4 state.
+    add esi, 4 + 16
+    # Make EDI also point to the RC4 state.
     mov edi, esi
-    # This should be 4 + 16 + 256, but that's too big. Instead, we add 4 + 16
-    # here then increment it once in each iteration of the next loop (which
-    # iterates 256 times).
-    add edi, 4 + 16
-
-    # ESI points to: output_length[4] || key[16] || work_area[256] || output...
 
 # Initialization (Part 1).
 
     # Fill the state with K[i] = i.
-    # We do this in backwards order.
-    # Loop ecx = 255, 254, ..., 0
+    # We do this in forwards order.
+    # Loop eax = 0, 1, ..., 255
 
-    # Get 256 in ECX.
-    xor ecx, ecx
-    inc ecx
-    shl ecx, 8
+    xor eax, eax
 
 start_fill:
     # We're using this loop also to add 256 to edi (see above)
-    inc edi
 
-    # 255, 254, ... 0
-    dec ecx
+    # K[eax] = al
+    stosb
 
-    # K[ecx] = ecx
-    mov BYTE PTR [esi + 4 + 16 + ecx], cl
-
-    # If we haven't reached zero, loop again.
-    test ecx, ecx
+    # If we haven't reached 256, loop again.
+    inc al
     jnz start_fill
 
 # Initialization (Part 2).
     # Shuffle the state according to the key. 
 
-    # I'd zero ecx here, but we don't have to, since the loop above terminates
-    # with ecx == 0.
+    # I'd zero eax here, but we don't have to, since the loop above terminates
+    # with eax == 0.
+    # eax will hold the key index (always eax == ebx % 16)
 
-    # edx will hold the key index (always edx == ecx % 16)
-    xor edx, edx
-    # eax will hold j
-    xor eax, eax
+    xor ebx, ebx
 
-# Loop ecx = 0, 1, 2, ... 255
+    # edx will hold j
+    cdq
+
+# Loop ebx = 0, 1, 2, ... 255
 loop_start:
-    # j = j + K[i]
-    add al, BYTE PTR [ESI + 4 + 16 + ecx]
-    # j = (j + K[i] + key[i]) % 256
-    add al, BYTE PTR [ESI + 4 + edx]
+    # Increment the key index (mod 16)
+    mov al, bl
+    and al, 0Fh
 
-    # Note: This preserves the zeroness of the 3 most-signifigant bytes of EAX,
+    # j = j + K[i]
+    add dl, BYTE PTR [ESI + ebx]
+    # j = (j + K[i] + key[i]) % 256
+    add dl, BYTE PTR [ESI + 4 + eax]
+
+    # Note: This preserves the zeroness of the 3 most-signifigant bytes of EDX,
     # which is exactly what we want.
 
-    # Swap bytes K[i] and K[j] (K[ecx] and K[eax]).
-    call swap_eax_ecx_bytes_using_ebx
+    # Swap bytes K[i] and K[j] (K[ebx] and K[edx]).
+    call swap_edx_ebx_bytes_using_al
 
-    # Increment the key index (mod 16)
-    inc edx
-    and edx, 0xF
-
-    # Increment ecx (mod 256)
-    inc cl
-    # If ecx was 255, it will now be 0, because overflow.
+    # Increment ebx (mod 256)
+    inc bl
+    # If ebx was 255, it will now be 0, because overflow.
     # So if it's zero, we should stop the loop.
     jnz loop_start
 loop_end:
 
+    cdq
 
 # Keystream Computation
 
-    # Set edx to the address where we should stop writing key bytes.
-    mov edx, edi
-    add edx, DWORD PTR [esi]                    # (+ length)
+    # Set ecx to the address where we should stop writing key bytes.
+    mov ecx, DWORD PTR [esi]                    # (length)
 
-    # Again, ordinarily we'd have to zero ecx, but it's already zero when the
+    # Again, ordinarily we'd have to zero ebx, but it's already zero when the
     # previous loop ends, so we don't have to.
 
-    # In the following, ECX holds the i variable.
-    # EAX is j.
-    xor eax, eax
+    # In the following, EBX holds the i variable.
+    # EDX is j.
 
     # We make a space-saving assumption that the length is at least one, so that
     # this loop body will always execute at least once. So, be careful if you
@@ -114,39 +102,35 @@ loop_end:
 
 stream_start:
     # i = (i + 1) % 256
-    inc cl
+    inc bl
     # j = (j + K[i]) % 256
-    add al, BYTE PTR [ESI + 4 + 16 + ecx]
+    add dl, BYTE PTR [ESI + ebx]
 
-    # swap K[i] and K[j] (K[ecx] and K[eax])
-    call swap_eax_ecx_bytes_using_ebx
+    # swap K[i] and K[j] (K[ebx] and K[edx])
+    call swap_edx_ebx_bytes_using_al
 
     # Output K[ (K[i] + K[j]) % 256 ]
-    xor ebx, ebx
-    mov bl, BYTE PTR [ESI + 4 + 16 + ecx]       # ebx = K[i]
-    add bl, BYTE PTR [ESI + 4 + 16 + eax]       # ebx = K[i] + K[j]
-    mov bl, BYTE PTR [ESI + 4 + 16 + ebx]       # ebx = K[(K[i] + K[j]) % 256]
-    mov BYTE PTR [edi], bl                      # Output the byte.
+    mov al, BYTE PTR [ESI + ebx]                # eax = K[i]
+    add al, BYTE PTR [ESI + edx]                # eax = K[i] + K[j]
+    mov al, BYTE PTR [ESI + eax]                # eax = K[(K[i] + K[j]) % 256]
+    stosb                                       # Output the byte.
 
-    inc edi
-    # If edi made it to edx, we're at the end of the output space.
-    cmp edx, edi
-    jne stream_start
+    # If ecx is zero, we're at the end of the output space.
+    loop stream_start
 stream_end:
 
     popad
     ret
 
-# Little subroutine that swaps K[eax] with K[ecx].
-# It clobbers the EBX register.
-swap_eax_ecx_bytes_using_ebx:
-    mov bl, BYTE PTR [ESI + 4 + 16 + eax]
-    xchg bl, BYTE PTR [ESI + 4 + 16 + ecx]
-    mov BYTE PTR [ESI + 4 + 16 + eax], bl
+# Little subroutine that swaps K[ebx] with K[edx].
+# It clobbers the AL register.
+swap_edx_ebx_bytes_using_al:
+    mov al, BYTE PTR [ESI + edx]
+    xchg al, BYTE PTR [ESI + ebx]
+    mov BYTE PTR [ESI + edx], al
     ret
 
 # Notes:
 
-# TODO: Make it compute_rc4(char *key, char *out, int length)
 # TODO: Make it use the stack for the RC4 state
 
