@@ -1,4 +1,4 @@
-# RC4 Cipher in 75 bytes of x86.
+# RC4 Cipher in 74 bytes of x86.
 # Peter Ferrie
 # Oct 23, 2014
 
@@ -60,20 +60,32 @@ start_fill:
 
     xor ebx, ebx
 
+zero_edx:
     # edx will hold j
     cdq
 
 # Loop ebx = 0, 1, 2, ... 255
 loop_start:
+    pushfd
+
+    # Conditionally increment ebx (mod 256)
+    adc bl, bh
+
     # Increment the key index (mod 16)
     mov al, bl
-    and al, 0Fh
+    and al, 0xF
 
     # j = j + K[i]
     add dl, BYTE PTR [ESI + ebx]
+
+    popfd
+    pushfd
+    jb skip_key
+
     # j = (j + K[i] + key[i]) % 256
     add dl, BYTE PTR [ESI + eax - 16]
 
+skip_key:
     # Note: This preserves the zeroness of the 3 most-signifigant bytes of EDX,
     # which is exactly what we want.
 
@@ -82,19 +94,20 @@ loop_start:
     xchg al, BYTE PTR [ESI + ebx]
     mov BYTE PTR [ESI + edx], al
 
+    popfd
+    jb stream_start
+
+inc_ebx:
     # Increment ebx (mod 256)
     inc bl
     # If ebx was 255, it will now be 0, because overflow.
     # So if it's zero, we should stop the loop.
     jnz loop_start
-loop_end:
 
-    cdq
+    stc
+    jb zero_edx
 
 # Keystream Computation
-
-    # Set ecx to the address where we should stop writing key bytes.
-    mov ecx, DWORD PTR [esi]                    # (length)
 
     # Again, ordinarily we'd have to zero ebx, but it's already zero when the
     # previous loop ends, so we don't have to.
@@ -107,24 +120,16 @@ loop_end:
     # are using this with a user-supplied length, it could overflow your buffer.
 
 stream_start:
-    # i = (i + 1) % 256
-    inc bl
-    # j = (j + K[i]) % 256
-    add dl, BYTE PTR [ESI + ebx]
-
-    # swap K[i] and K[j] (K[ebx] and K[edx])
-    mov al, BYTE PTR [ESI + edx]
-    xchg al, BYTE PTR [ESI + ebx]
-    mov BYTE PTR [ESI + edx], al
-
     # Output K[ (K[i] + K[j]) % 256 ]
     mov al, BYTE PTR [ESI + ebx]                # eax = K[i]
     add al, BYTE PTR [ESI + edx]                # eax = K[i] + K[j]
     mov al, BYTE PTR [ESI + eax]                # eax = K[(K[i] + K[j]) % 256]
     stosb                                       # Output the byte.
 
+    stc
+
     # If ecx is zero, we're at the end of the output space.
-    loop stream_start
+    loop loop_start
 stream_end:
 
     popad
