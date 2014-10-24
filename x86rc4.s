@@ -1,6 +1,6 @@
-# RC4 Cipher in 73 bytes of x86.
+# RC4 Cipher in 69 bytes of x86.
 # Peter Ferrie
-# Oct 23, 2014
+# Oct 24, 2014
 
 # Based on RC4 Cipher in 104 bytes of x86 by Taylor Hornby
 
@@ -25,7 +25,7 @@ compute_rc4:
     # Make ESI point to buf (+32 for pushad, +4 for return address).
     mov esi, DWORD PTR [esp + 32 + 4]
 
-    # Set ecx to the address where we should stop writing key bytes.
+    # Set ecx to the length where we should stop writing key bytes.
     mov ecx, DWORD PTR [esi]                    # (length)
 
     # Now make ESI point to the RC4 state.
@@ -67,19 +67,14 @@ zero_edx:
 # Loop ebx = 0, 1, 2, ... 255
 loop_start:
     pushfd
-
-    # Conditionally increment ebx (mod 256)
-    adc bl, bh
+    # j = j + K[i]
+    add dl, BYTE PTR [ESI + ebx]
+    popfd
+    jb skip_key
 
     # Increment the key index (mod 16)
     mov al, bl
     and al, 0xF
-
-    # j = j + K[i]
-    add dl, BYTE PTR [ESI + ebx]
-
-    popfd
-    jb skip_key
 
     # j = (j + K[i] + key[i]) % 256
     add dl, BYTE PTR [ESI + eax - 16]
@@ -91,18 +86,19 @@ skip_key:
     # which is exactly what we want.
 
     # Swap bytes K[i] and K[j] (K[ebx] and K[edx]).
-    mov al, BYTE PTR [ESI + edx]
-    xchg al, BYTE PTR [ESI + ebx]
-    mov BYTE PTR [ESI + edx], al
-
-    jb stream_start
+    mov al, BYTE PTR [ESI + ebx]
+    xchg al, BYTE PTR [ESI + edx]               # eax = K[i]
+    mov BYTE PTR [ESI + ebx], al
 
     # Increment ebx (mod 256)
     inc bl
+    jb stream_start
+
     # If ebx was 255, it will now be 0, because overflow.
     # So if it's zero, we should stop the loop.
     jnz loop_start
 
+    inc ebx
     stc
     jb zero_edx
 
@@ -120,7 +116,6 @@ skip_key:
 
 stream_start:
     # Output K[ (K[i] + K[j]) % 256 ]
-    mov al, BYTE PTR [ESI + ebx]                # eax = K[i]
     add al, BYTE PTR [ESI + edx]                # eax = K[i] + K[j]
     mov al, BYTE PTR [ESI + eax]                # eax = K[(K[i] + K[j]) % 256]
     stosb                                       # Output the byte.
@@ -133,8 +128,3 @@ stream_end:
 
     popad
     ret
-
-# Notes:
-
-# TODO: Make it use the stack for the RC4 state
-
